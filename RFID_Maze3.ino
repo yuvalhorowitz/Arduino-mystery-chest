@@ -1,0 +1,344 @@
+#include <LiquidCrystal.h> // Include the LiquidCrystal library
+#include <SPI.h>
+#include <MFRC522.h>
+LiquidCrystal lcd(7, 6, 5, 4, 3, 2); // Define LCD pin connections (adjust based on your wiring)
+//GLOBALS
+//Each reader has a unique Slave Select Pin
+const byte ssPin = 8;
+//They will share the same reset pin
+const byte resetPin = 9;
+//initialise an array of MFRC522 instances represnting each reader
+MFRC522 mfrc522(ssPin,resetPin);
+
+int binary_representation1[4]; // Fixed-size array for binary representation - number of mission one
+int binary_representation2[4]; // Fixed-size array for binary representation - number of mission two
+int binary_representation3[4]; // Fixed-size array for binary representation - number of mission three
+
+int* get_binary_representation1(int num) { //filling up the binary represntation array according to the number of mission one
+  // Iterate through each bit position (MSB to LSB)
+  for (int i = 3; i >= 0; i--) {
+    // Check if the bit at position i is 1 and store it in the array
+    binary_representation1[i] = (num >> i) & 1;
+  }
+
+  return binary_representation1; // Return the static array
+}
+
+int* get_binary_representation2(int num) { //filling up the binary represntation array according to the number of mission two
+  // Iterate through each bit position (MSB to LSB)
+  for (int i = 3; i >= 0; i--) {
+    // Check if the bit at position i is 1 and store it in the array
+    binary_representation2[i] = (num >> i) & 1;
+  }
+
+  return binary_representation2; // Return the static array
+}
+
+int* get_binary_representation3(int num) {//filling up the binary represntation array according to the number of mission three
+  // Iterate through each bit position (MSB to LSB)
+  for (int i = 3; i >= 0; i--) {
+    // Check if the bit at position i is 1 and store it in the array
+    binary_representation3[i] = (num >> i) & 1;
+  }
+
+  return binary_representation3; // Return the static array
+}
+
+int Pow(int X, int Y) { //function that return X in the power of Y
+
+  int power = 1, i;
+
+  for (i = 1; i <= Y; i++) {
+    power = power * X;
+  }
+
+  return power;
+
+}
+
+int first_num = 3; //initial value of mission one
+int second_num = 7; //initial value of mission two
+int third_num = 14; //initial value of mission three
+int fixed_1 = first_num; //keeping the initial value as backup, in case there is a need to restart the mission
+int fixed_2 = second_num; //keeping the initial value as backup, in case there is a need to restart the mission
+int fixed_3 = third_num; //keeping the initial value as backup, in case there is a need to restart the mission
+int Fixed_targets[] = {fixed_1,fixed_2,fixed_3}; //an array of the initial values
+int num_Bank[]= {first_num,second_num,third_num};
+int* binary_rep1 = get_binary_representation1(first_num); //a pointer of the array containing the binary represntation of each mission number
+int* binary_rep2 = get_binary_representation2(second_num);
+int* binary_rep3 = get_binary_representation3(third_num);
+int* target_Bank[] = {binary_rep1,binary_rep2,binary_rep3};
+int target_Size = 3; //number of game levels
+const String IDsBank[] = {"3304f2fd","23cbd8fd","d33e08ec","632dc6fd"};//an array with the UID of each RFID card used in the game: 0 in index 0 ... 3 in index 3
+int bank_Size = 4; //number of valid RFID cards
+
+//initialising pins for the leds, buzzer and relay
+int first_led = A0;
+int second_led = A1;
+int buzzer = A3;
+int relay = 10;
+
+int power =0;//variable for the needed power of the binary index
+
+String uidString="";//String for storing the UID of the currently used RFID card in raw format
+
+//boolean for showing current binary "situation" on the lcd screen
+bool index_0 = false;
+bool index_1 = false;
+bool index_2 = false;
+bool index_3 = false;
+
+
+void Blocks(bool index_0,bool index_1,bool index_2,bool index_3){//function that writes on the LCD the current state of the binary represntation
+    lcd.setCursor(6, 1); // Set cursor to first column of the second row
+    for (int i = 3; i > -1; i--) {
+      
+      if ((i == 0)&&(index_0==true)){
+        lcd.write("V");
+      }
+      else if ((i == 1)&&(index_1==true)){
+        lcd.write("V");
+      }
+      else if ((i == 2)&&(index_2==true)){
+        lcd.write("V");
+      }
+      else if ((i == 3)&&(index_3==true)){
+        lcd.write("V");
+      }
+      else{
+        lcd.write(byte(255));
+      }
+      
+    } // Print a full block character
+}
+
+void setup()
+{
+  
+  lcd.begin(16, 2); //initialise LCD
+  //Initialise serial communications channel with the PC
+  Serial.begin(9600);
+  Serial.println(("Serial communication started"));
+
+  //initialise pins of leds, buzzer and relay
+  pinMode(first_led, OUTPUT);
+  pinMode(second_led, OUTPUT);
+  pinMode(buzzer, OUTPUT);
+  pinMode(relay,OUTPUT);
+  digitalWrite(relay, LOW);
+  //Inititalise the SPI bus for RFID
+  SPI.begin();
+  mfrc522.PCD_Init();
+  delay(4);
+  lcd.setCursor(3, 0);
+  //initialise message in the serial monitor and LCD
+  lcd.print("Lets Begin");
+  Serial.print(("Reader#"));
+  Serial.print((" initialised on pin "));
+  Serial.print(String(ssPin));
+  Serial.print((". Antenna strength: "));
+  Serial.print(mfrc522.PCD_GetAntennaGain());
+  Serial.print((". Version: "));
+  mfrc522.PCD_DumpVersionToSerial();
+  delay(3000);
+  Serial.println(("----- END SETUP -----"));
+}
+
+void loop(){
+  
+  boolean correctValue = false; //a boolean for showing if a fitting card for the bunary represntaion has been used
+  mfrc522.PCD_Init();
+  delay(4);
+  String readRFID = "";//String for storing the UID of the currently used RFID card in usable format
+  int i=3;//variable for current mission progress - from 0 to 2 (3 goes out of the while loop)
+   while(i<target_Size)
+  {
+  lcd.clear();
+  lcd.print("Mission Number:");
+  lcd.print(i+1);
+  Blocks(index_0,index_1,index_2,index_3);//calling the function that print binary blocks
+  delay(2000);
+  digitalWrite(first_led,LOW);//reseting green led
+  lcd.clear();
+  lcd.print("The target is ");
+  lcd.print(Fixed_targets[i]);//showing current target number on the LCD
+  Blocks(index_0,index_1,index_2,index_3);//calling the function that print binary blocks
+  delay(2000);
+  if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
+    Serial.print("Mission number ");
+    Serial.println(i+1);
+    Serial.print("Target: ");
+    Serial.println(num_Bank[i]);
+    uidString="";
+    for (byte j = 0; j < mfrc522.uid.size; j++) {
+      // Convert byte to hex string
+      String hexString = String(mfrc522.uid.uidByte[j], HEX);
+      
+      // Add leading zeros manually
+      if (hexString.length() < 2) {
+        uidString += "0";
+      }
+      uidString += hexString;
+    }
+    readRFID = uidString;
+    Serial.print("UID tag detected :");
+    Serial.println(readRFID);
+    digitalWrite(buzzer,HIGH);//indicating for the user that the card was detected
+    delay(100);
+    digitalWrite(buzzer,LOW);
+    delay(100);
+    digitalWrite(buzzer,HIGH);
+    delay(100);
+    digitalWrite(buzzer,LOW);
+    //readRFID = uid;
+    mfrc522.PICC_HaltA(); // Stop reading RFID
+    mfrc522.PCD_StopCrypto1(); // Stop encryption on the card
+    delay(2000);
+    correctValue = false;
+    for(int k = 0; k<bank_Size;k++)//loop for figuring out which card was used - and its binary weight
+    {
+      if(readRFID == IDsBank[k])//if the UID is in the k index in the UID bank array
+      {
+        if(target_Bank[i][k]==1)//checking if the number has a 1 in its k index of the binary represntation
+        {
+         correctValue = true;
+         power = k;
+         if (k==0){//checks which index is needed to be showed as amrked on the lcd screen
+          index_0 = true;
+         }
+         if (k==1){
+          index_1 = true;
+         }
+         if (k==2){
+          index_2 = true;
+         }
+         if (k==3){
+          index_3 = true;
+         }
+         
+         int reduce = Pow(2,power);//variable for the nedded number to reduce from target number after using correct card
+         num_Bank[i] = num_Bank[i] - reduce;//updating the target number of the current mission
+         //updating the array of the bunary represtation to updated target number
+         if (i==0)
+         {
+          first_num = num_Bank[i];
+          binary_rep1 = get_binary_representation1(first_num);
+          
+         }
+         if (i==1)
+         {
+          second_num = num_Bank[i];
+          binary_rep2 = get_binary_representation2(second_num);
+         }
+         if (i==2)
+         {
+          third_num = num_Bank[i];
+          binary_rep3 = get_binary_representation3(third_num);
+         }
+         
+         }
+         else //if a wrong card was used or a the specific card was used before
+         {
+          Serial.println("Wrong one");
+          digitalWrite(buzzer,HIGH);
+          digitalWrite(second_led,HIGH);
+          lcd.clear();
+          lcd.print("Wrong! Try again");
+          delay(750);
+          digitalWrite(buzzer,LOW);
+          digitalWrite(second_led,LOW);
+          //reseting the current target number and its binray represntation          
+         if (i==0)
+         {
+          
+          first_num = Fixed_targets[i];
+          binary_rep1 = get_binary_representation1(first_num);
+          
+         }
+         if (i==1)
+         {
+          second_num = Fixed_targets[i];
+          binary_rep2 = get_binary_representation2(second_num);
+         }
+         if (i==2)
+         {
+          third_num = Fixed_targets[i];
+          binary_rep3 = get_binary_representation3(third_num);
+         }
+        
+        // reseting boolean indicators of binary blocks
+        index_0 = false;
+        index_1 = false;
+        index_2 = false;
+        index_3 = false;
+        num_Bank[i] = Fixed_targets[i]; //reseting target number        
+         }
+       }
+    }
+    if(correctValue){//if  a correct card was used
+      //printing indicator in the serial monitor
+      Serial.print(("Reader #"));
+      Serial.print(String(power));
+      Serial.print((" on Pin #"));
+      Serial.print(String((ssPin)));
+      Serial.print((" detected tag:  "));
+      Serial.println(IDsBank[power]);
+      Serial.print(("Target is now:  "));
+      Serial.println(num_Bank[i]);
+
+      if (num_Bank[i] == 0)//checking if the level is complete - target was successfully represnted in binary
+      {
+        Blocks(index_0,index_1,index_2,index_3); // showing current blocks
+        if (i<=1){
+          digitalWrite(first_led,HIGH);//green led for passing to next level
+        }
+        delay(500);
+        // reseting boolean indicators of binary blocks
+        index_0 = false;
+        index_1 = false;
+        index_2 = false;
+        index_3 = false;
+        i++; //passing to next mission level 
+      }
+     }
+    
+   }     
+ }
+ delay(500);
+
+ onSolve(); //if we reach here the player won the puzzle
+}
+
+void onSolve(){//function for opening the chest and finishing the puzzle
+  Serial.println(("Puzzle Solved!"));
+  lcd.clear();
+  lcd.print("YOU WON!!!");
+  digitalWrite(buzzer,HIGH);
+  digitalWrite(relay, HIGH);
+  delay(500);
+  digitalWrite(buzzer,LOW);
+  int k = 0;
+  while(k<10){//blinking red and green 10 times
+    digitalWrite(second_led,HIGH);
+    digitalWrite(first_led,HIGH);
+    delay(300);
+    digitalWrite(second_led,LOW);
+    digitalWrite(first_led,LOW);
+    delay(300);
+    k+=1;
+  }
+  digitalWrite(relay,LOW);
+  while(true){ 
+  } 
+}
+
+
+
+
+
+
+
+
+  
+  
+  
